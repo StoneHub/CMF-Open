@@ -57,7 +57,7 @@ class Session:
         try:
             messages = list(self._decoder.feed(data))
         except frame.FrameError as exc:
-            log.warning("dropping bad frame: %s", exc)
+            log.warning("dropping bad frame: %s (raw %s)", exc, data.hex())
             return
         for msg in messages:
             log.debug("<- %s %s", ops.name_of(msg.op), msg.payload.hex())

@@ -33,15 +33,15 @@ async def connect(args: argparse.Namespace, need_auth: bool = True) -> AsyncIter
         transport = SimWatch(on_event=_sim_event)
         address = "SIM"
     else:
-        from .transport.ble import BleTransport, scan
+        from .transport.ble import BleTransport, find_first
 
         address = args.address
         if not address:
-            found = await scan()
+            found = await find_first()
             if not found:
                 sys.exit("No CMF watch found. Unpair it from the Nothing X app's BLE connection, or pass --address.")
-            address = found[0].address
-            print(f"Using {found[0].name} ({address})")
+            address = found.address
+            print(f"Using {found.name} ({address})")
         transport = BleTransport(address)
     await transport.connect()
     session = Session(transport)

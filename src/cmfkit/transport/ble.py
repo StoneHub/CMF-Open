@@ -21,6 +21,11 @@ NOTIFY_UUIDS = {
 }
 
 
+async def find_first(timeout: float = 10.0) -> BLEDevice | None:
+    """Return the first CMF watch seen, without waiting out the full scan window."""
+    return await BleakScanner.find_device_by_filter(lambda d, _adv: (d.name or "").startswith(NAME_PREFIX), timeout)
+
+
 async def scan(timeout: float = 8.0) -> list[BLEDevice]:
     devices = await BleakScanner.discover(timeout=timeout)
     return [d for d in devices if (d.name or "").startswith(NAME_PREFIX)]
