@@ -2,6 +2,8 @@ package dev.cmfopen.protocol
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 
 class AuthException(message: String) : Exception(message)
@@ -25,6 +27,8 @@ class Session(
     private val decoder = FrameDecoder()
     private val waiters = ArrayList<Pair<Set<Op>, CompletableDeferred<Message>>>()
     private val listeners = ArrayList<(Message) -> Unit>()
+    /** Keeps the frames of one message together when several coroutines send at once. */
+    private val writeMutex = Mutex()
     private val shellBuf = StringBuilder()
     private var shellWaiter: CompletableDeferred<String>? = null
 
@@ -89,8 +93,10 @@ class Session(
 
     suspend fun send(op: Op, payload: ByteArray = ByteArray(0), channel: Channel = Channel.COMMAND) {
         log("->", "${Ops.nameOf(op)} ${Bytes.hex(payload).take(64)}")
-        val k = synchronized(lock) { key }
-        for (f in Frame.encode(op, payload, k, transport.mtu)) transport.write(channel, f)
+        writeMutex.withLock {
+            val k = synchronized(lock) { key }
+            for (f in Frame.encode(op, payload, k, transport.mtu)) transport.write(channel, f)
+        }
     }
 
     suspend fun request(
@@ -120,7 +126,7 @@ class Session(
             shellWaiter = w
         }
         try {
-            transport.write(Channel.SHELL, (line + "\r\n").toByteArray())
+            writeMutex.withLock { transport.write(Channel.SHELL, (line + "\r\n").toByteArray()) }
             return withTimeout(timeoutMs) { w.await() }
         } catch (e: TimeoutCancellationException) {
             throw java.util.concurrent.TimeoutException("no reply to $line")
