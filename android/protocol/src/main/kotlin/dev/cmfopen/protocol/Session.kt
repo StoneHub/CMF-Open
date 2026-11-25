@@ -5,6 +5,7 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 
 class AuthException(message: String) : Exception(message)
 
@@ -27,6 +28,8 @@ class Session(
     private val decoder = FrameDecoder()
     private val waiters = ArrayList<Pair<Set<Op>, CompletableDeferred<Message>>>()
     private val listeners = ArrayList<(Message) -> Unit>()
+    /** Claim messages with these ops before they reach [listeners] (used while a fetch is running). */
+    private val interceptors = ArrayList<Pair<Set<Op>, (Message) -> Unit>>()
     /** Keeps the frames of one message together when several coroutines send at once. */
     private val writeMutex = Mutex()
     private val shellBuf = StringBuilder()
@@ -45,6 +48,13 @@ class Session(
     fun onMessage(fn: (Message) -> Unit): () -> Unit {
         synchronized(lock) { listeners += fn }
         return { synchronized(lock) { listeners -= fn } }
+    }
+
+    /** Route messages with [ops] to [fn] instead of the listeners until the returned function is called. */
+    fun intercept(ops: Set<Op>, fn: (Message) -> Unit): () -> Unit {
+        val entry = ops to fn
+        synchronized(lock) { interceptors += entry }
+        return { synchronized(lock) { interceptors.remove(entry) } }
     }
 
     private fun onNotify(channel: Channel, data: ByteArray) {
@@ -77,6 +87,9 @@ class Session(
                 if (i >= 0) {
                     val w = waiters.removeAt(i).second
                     deliveries += { w.complete(msg) }
+                } else if (interceptors.any { msg.op in it.first }) {
+                    val fn = interceptors.first { msg.op in it.first }.second
+                    deliveries += { fn(msg) }
                 } else {
                     val ls = listeners.toList()
                     deliveries += { ls.forEach { runCatching { it(msg) }.onFailure { e -> log("!!", "listener: $e") } } }
@@ -249,6 +262,66 @@ class Session(
             forget(pending)
         }
     }
+
+    // -- health ---------------------------------------------------------------
+
+    /**
+     * Download recorded health data (see [HealthOps] for the flow). Every data message is passed to
+     * [onData] as it arrives, so the caller can persist it before parsing. Returns the parsed batch;
+     * `complete` is false if the watch went quiet before saying it was done.
+     */
+    suspend fun fetchHealth(
+        idleTimeoutMs: Long = 20_000,
+        totalTimeoutMs: Long = 5 * 60_000,
+        onData: (Message) -> Unit = {},
+    ): HealthFetch {
+        val inbox = kotlinx.coroutines.channels.Channel<Message>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+        val release = intercept(HealthOps.ALL) { inbox.trySend(it) }
+        val batch = Health.Batch()
+        var since: Long? = null
+        var started = false
+
+        /** True when the watch says it is done, false when it goes quiet mid-transfer. */
+        suspend fun drain(): Boolean {
+            while (true) {
+                val m = withTimeoutOrNull(if (started) idleTimeoutMs else timeoutMs) { inbox.receive() }
+                if (m == null) {
+                    if (started) return false
+                    throw java.util.concurrent.TimeoutException("no reply to HEALTH_FETCH_START")
+                }
+                when (m.op) {
+                    HealthOps.FETCH_STATUS -> when (m.payload.firstOrNull()?.toInt()) {
+                        1 -> if (!started) {
+                            started = true
+                            send(HealthOps.FETCH_CONTINUE, Payloads.POLL)
+                        }
+                        2 -> return true
+                        else -> log("!!", "unknown health fetch status ${Bytes.hex(m.payload)}")
+                    }
+                    HealthOps.FETCH_SINCE -> {
+                        started = true
+                        if (m.payload.size >= 4) since = Health.parseReadings(m.payload.copyOf(8))?.first()?.tsS
+                    }
+                    else -> {
+                        started = true
+                        onData(m)
+                        if (!batch.add(m)) log("!!", "health message did not parse: $m")
+                    }
+                }
+            }
+        }
+
+        try {
+            send(HealthOps.FETCH_START, Payloads.POLL)
+            val complete = withTimeoutOrNull(totalTimeoutMs) { drain() } ?: false
+            return HealthFetch(batch, since, complete)
+        } finally {
+            release()
+            inbox.close()
+        }
+    }
+
+    data class HealthFetch(val batch: Health.Batch, val sinceS: Long?, val complete: Boolean)
 
     companion object {
         /** Shown on the watch as the paired phone's name. */

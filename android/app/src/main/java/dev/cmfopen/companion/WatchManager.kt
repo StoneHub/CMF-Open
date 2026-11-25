@@ -9,9 +9,11 @@ import android.content.pm.PackageManager
 import android.os.Build
 import dev.cmfopen.companion.apps.AppRuntime
 import dev.cmfopen.companion.ble.BleTransport
+import dev.cmfopen.companion.health.HealthSync
 import dev.cmfopen.companion.media.MediaBridge
 import dev.cmfopen.companion.weather.WeatherSync
 import dev.cmfopen.protocol.AuthException
+import dev.cmfopen.protocol.HealthOps
 import dev.cmfopen.protocol.Message
 import dev.cmfopen.protocol.Ops
 import dev.cmfopen.protocol.Payloads
@@ -59,6 +61,7 @@ class WatchManager(private val context: Context, private val prefs: Prefs) {
     val weather = WeatherSync(context, prefs, this)
     val apps = AppRuntime(context, prefs, this)
     val ringer = PhoneRinger(context)
+    val health = HealthSync(context, prefs, this)
 
     @Volatile private var session: Session? = null
     private var transport: BleTransport? = null
@@ -186,6 +189,8 @@ class WatchManager(private val context: Context, private val prefs: Prefs) {
         t.connect()
         val s = Session(t, log = DebugLog::add)
         s.onMessage(::onWatchMessage)
+        // Health data the watch pushes on its own (outside a fetch) is kept for the next sync.
+        s.onMessage { if (it.op in HealthOps.DATA) health.onUnsolicited(it) }
         val stored = prefs.authkey(address)
         if (stored != null && !forcePair) {
             DebugLog.info("logging in with stored key")
@@ -207,6 +212,7 @@ class WatchManager(private val context: Context, private val prefs: Prefs) {
         DebugLog.info("connected: firmware $fw, battery ${bat?.level}%")
         onConnected()
         scope.launch { housekeeping(s, dropped) }
+        health.onConnected()
     }
 
     private fun phoneName() = (Build.MODEL ?: "Android").take(24)
@@ -236,6 +242,7 @@ class WatchManager(private val context: Context, private val prefs: Prefs) {
                 val b = it.battery()
                 _state.update { st -> st.copy(battery = b.level, charging = b.charging) }
             }
+            health.tick()
         }
     }
 

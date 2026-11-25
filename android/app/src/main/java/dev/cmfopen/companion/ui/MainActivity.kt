@@ -8,6 +8,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Watch
@@ -49,6 +50,7 @@ private enum class Tab(val label: String, val icon: ImageVector) {
     WATCH("Watch", Icons.Filled.Watch),
     ALERTS("Alerts", Icons.Filled.Notifications),
     APPS("Apps", Icons.Filled.Apps),
+    HEALTH("Health", Icons.Filled.Favorite),
     LOG("Log", Icons.Filled.Terminal),
 }
 
@@ -74,6 +76,7 @@ private fun Root() {
             Tab.WATCH -> WatchScreen(m)
             Tab.ALERTS -> AlertsScreen(m)
             Tab.APPS -> AppsScreen(m)
+            Tab.HEALTH -> HealthScreen(m)
             Tab.LOG -> LogScreen(m)
         }
     }

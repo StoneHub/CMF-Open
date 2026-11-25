@@ -68,5 +68,5 @@ object Ops {
             .associate { f -> f.isAccessible = true; (f.get(this) as Op) to f.name }
     }
 
-    fun nameOf(op: Op): String = names[op] ?: op.toString()
+    fun nameOf(op: Op): String = names[op] ?: HealthOps.nameOf(op) ?: op.toString()
 }

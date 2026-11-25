@@ -17,6 +17,12 @@ class SimWatch(private val scope: CoroutineScope = CoroutineScope(Dispatchers.De
     private var authkey: ByteArray? = null
     private var key: ByteArray? = null
     private val dec = FrameDecoder(plaintextCrcOnWire = true)
+    /** Outgoing notifications, delivered one at a time in order, off the caller's thread (like BLE). */
+    private val outbox = kotlinx.coroutines.channels.Channel<Pair<Channel, ByteArray>>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+
+    init {
+        scope.launch { for ((ch, data) in outbox) handler?.invoke(ch, data) }
+    }
 
     override fun setNotifyHandler(handler: (Channel, ByteArray) -> Unit) { this.handler = handler }
 
@@ -24,7 +30,17 @@ class SimWatch(private val scope: CoroutineScope = CoroutineScope(Dispatchers.De
         val k = key
         val frames = if (bare) listOf(Bytes.fromHex("f50000%04x00010001%04x".format(op.cmd1, op.cmd2)))
         else Frame.encode(op, payload, k, mtu, omitPlaintextCrc = true)
-        frames.forEach { f -> scope.launch { handler?.invoke(Channel.COMMAND, f) } }
+        frames.forEach { outbox.trySend(Channel.COMMAND to it) }
+    }
+
+    /** Recorded health messages served by the next fetch (then cleared, like the real watch). */
+    val health = ArrayList<Message>()
+
+    /** Send several messages strictly in order (separate [reply] calls may interleave). */
+    private fun replyInOrder(messages: List<Message>) {
+        val k = key
+        val frames = messages.flatMap { Frame.encode(it.op, it.payload, k, mtu, omitPlaintextCrc = true) }
+        frames.forEach { outbox.trySend(Channel.COMMAND to it) }
     }
 
     fun press(code: Int) = reply(Ops.MUSIC_BUTTON, byteArrayOf(code.toByte()))
@@ -33,7 +49,7 @@ class SimWatch(private val scope: CoroutineScope = CoroutineScope(Dispatchers.De
         if (channel == Channel.SHELL) {
             val cmd = String(data).trim().removePrefix("AT").trim().uppercase()
             val out = if (cmd == "GETSECRET") "GETSECRET:${Bytes.hex(secret).uppercase()},OK" else "$cmd,ERROR"
-            scope.launch { handler?.invoke(Channel.SHELL, out.toByteArray()) }
+            outbox.trySend(Channel.SHELL to out.toByteArray())
             return
         }
         dec.key = key
@@ -73,6 +89,13 @@ class SimWatch(private val scope: CoroutineScope = CoroutineScope(Dispatchers.De
             Ops.APP_NOTIFICATION -> {
                 notifications += Payloads.parseNotification(p)
                 reply(Ops.APP_NOTIFICATION_ACK, bare = true)
+            }
+            HealthOps.FETCH_START -> reply(HealthOps.FETCH_STATUS, byteArrayOf(1))
+            HealthOps.FETCH_CONTINUE -> {
+                val out = listOf(Message(HealthOps.FETCH_SINCE, Bytes.concat(Bytes.u32le(1_764_000_000), ByteArray(4)))) +
+                    health + Message(HealthOps.FETCH_STATUS, byteArrayOf(2))
+                health.clear()
+                replyInOrder(out)
             }
             Ops.MUSIC_INFO_SET -> {
                 music = Payloads.parseMusicInfo(p)
