@@ -283,7 +283,11 @@ private fun WeatherSection() {
     var busy by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf(app.watch.weather.last?.let { "${it.place}: ${it.tempC}°C, ${it.description}" }) }
     Section("Weather") {
-        ToggleRow("Send weather to the watch", prefs.weatherEnabled, "From Open-Meteo, every 30 minutes.") { prefs.weatherEnabled = it }
+        ToggleRow("Send weather to the watch", prefs.weatherEnabled, "Now, hourly and 7-day forecast from Open-Meteo, refreshed every 30 minutes while connected.") { prefs.weatherEnabled = it }
+        ToggleRow("Fahrenheit and miles", prefs.imperialUnits, "Changes how the watch shows temperature and distance.") {
+            prefs.imperialUnits = it
+            app.watch.pushUnits()
+        }
         OutlinedTextField(
             value = city,
             onValueChange = { city = it },

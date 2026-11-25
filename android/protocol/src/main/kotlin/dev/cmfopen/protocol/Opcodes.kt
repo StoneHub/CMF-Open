@@ -38,6 +38,8 @@ object Ops {
     val CONTACTS_SET = Op(0x00D5, 0x0001)
     val CONTACTS_ACK = Op(0x00D5, 0x0003)
     val WEATHER_SET = Op(0xFFFF, 0x906B)
+    val UNIT_LENGTH = Op(0xFFFF, 0x9067)
+    val UNIT_TEMPERATURE = Op(0xFFFF, 0x9068)
 
     val WF_INIT1_REQUEST = Op(0xFFFF, 0x8052)
     val WF_INIT1_REPLY = Op(0xFFFF, 0x0052)

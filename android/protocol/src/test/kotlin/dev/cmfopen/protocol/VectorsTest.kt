@@ -28,7 +28,7 @@ class VectorsTest {
     @Test fun buildsTheSamePayloads() {
         assertEquals(str("notification"), Bytes.hex(Payloads.notification("Hi", "from cmfkit ✓", Payloads.Icons.GENERIC, 1_700_000_000)))
         assertEquals(str("music"), Bytes.hex(Payloads.musicInfo("Focus 24:59", "Pomodoro - 0 done", Payloads.MUSIC_PAUSED)))
-        assertEquals(str("weather"), Bytes.hex(Payloads.weather("Lisbon", 21)))
+        // The weather vector encodes cmfkit's old guessed layout; see WeatherTest for the real one.
         assertEquals(
             str("contacts"),
             Bytes.hex(Payloads.contacts(listOf(Payloads.Contact("Lap 1", "00:42"), Payloads.Contact("Ä long name ".repeat(4), "x")))),

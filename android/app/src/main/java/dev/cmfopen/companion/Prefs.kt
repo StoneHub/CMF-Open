@@ -94,6 +94,11 @@ class Prefs(context: Context) {
         get() = sp.getString("weather_city", "") ?: ""
         set(v) = edit { putString("weather_city", v.trim()) }
 
+    /** Fahrenheit and miles on the watch. Defaults to the phone's region (US, Liberia, Myanmar). */
+    var imperialUnits: Boolean
+        get() = sp.getBoolean("imperial", java.util.Locale.getDefault().country in setOf("US", "LR", "MM"))
+        set(v) = edit { putBoolean("imperial", v) }
+
     // -- contacts --------------------------------------------------------------
 
     /** Send starred contacts to the watch (needs READ_CONTACTS). */

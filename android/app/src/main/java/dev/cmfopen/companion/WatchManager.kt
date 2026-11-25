@@ -226,14 +226,20 @@ class WatchManager(private val context: Context, private val prefs: Prefs) {
             prefs.activeApp != null -> apps.restore()
             else -> media.push(force = true)
         }
+        scope.launch { withSession("units") { it.setUnits(prefs.imperialUnits) } }
         weather.refreshSoon()
         contacts.syncSoon()
     }
 
-    /** Battery and clock every 15 minutes while this session lives. */
+    /** Re-send the unit setting, e.g. after the toggle changes. */
+    fun pushUnits() {
+        scope.launch { withSession("units") { it.setUnits(prefs.imperialUnits) } }
+    }
+
+    /** Clock and battery every 30 minutes while this session lives (the watch pushes battery changes itself). */
     private suspend fun housekeeping(s: Session, dropped: CompletableDeferred<Unit>) {
         while (!dropped.isCompleted && session === s) {
-            withTimeoutOrNull(15 * 60_000L) { dropped.await() }
+            withTimeoutOrNull(30 * 60_000L) { dropped.await() }
             if (session !== s) return
             withSession("housekeeping") {
                 it.syncTime()

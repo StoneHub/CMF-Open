@@ -64,33 +64,92 @@ object Payloads {
         Contact(Bytes.str(p.copyOfRange(it, it + 32)), Bytes.str(p.copyOfRange(it + 32, it + 57)))
     }
 
-    private fun temp(c: Int) = ((c + 100) and 0xFF).toByte()
+    private fun temp(c: Int) = ((c + 100).coerceIn(0, 255)).toByte()
 
-    /** One day of the weather record. Only the temperature encoding is confirmed; field order is a best guess. */
-    data class WeatherDay(val condition: Int, val tempC: Int, val lowC: Int, val highC: Int)
-    data class WeatherHour(val condition: Int, val tempC: Int)
+    /** Watch weather icon ids (from Gadgetbridge's field-tested CMF support). */
+    object Weather {
+        const val NONE = 0
+        const val SUNNY = 1
+        const val CLOUDY = 2
+        const val OVERCAST = 3
+        const val SHOWERS = 4
+        const val SNOW = 5
+        const val FOG = 6
+        const val THUNDER = 9
+        const val SLEET = 14
+        const val HOT = 19
+        const val COLD = 20
+        const val WIND = 21
+        const val NIGHT_MOON = 22
+        const val NIGHT_STARS = 23
+        const val NIGHT_CLOUDY = 24
+        const val HAZE = 25
+        const val SUN_CLOUD = 26
+    }
 
     /**
-     * WEATHER_SET (FFFF:906B), 199 bytes: 7 x 9-byte days, 24 x 2-byte hours, city[32], 7 x sunrise/sunset.
-     * The city string and temperature encoding are confirmed on hardware; the rest is a best guess.
+     * One day of the forecast. [tempC] is "now" for today; the watch ignores it for later days.
+     * [aqi] is the US AQI, [uv] the UV index, [windKmh] is not shown by the watch.
+     */
+    data class WeatherDay(
+        val condition: Int,
+        val tempC: Int,
+        val highC: Int,
+        val lowC: Int,
+        val humidity: Int = 0,
+        val aqi: Int = 0,
+        val uv: Int = 0,
+        val windKmh: Int = 0,
+    )
+
+    data class WeatherHour(val condition: Int, val tempC: Int)
+
+    /** Sunrise and sunset for one day, as Unix seconds. */
+    data class SunTimes(val riseS: Long, val setS: Long)
+
+    /**
+     * WEATHER_SET (FFFF:906B), 199 bytes, as the Watch Pro 2 / 3 Pro firmware reads it:
+     *
+     * * 7 days x 9 bytes: condition, temp, max, min, humidity %, AQI u16 BE, UV, wind (temps are C+100).
+     *   Day 0 is today; days without data are `00 01 01 01 00 0000 00 00`.
+     * * 24 hours x 2 bytes: temp, condition, starting with the current hour.
+     * * city: UTF-8, at most 30 bytes, zero-padded to 32.
+     * * 7 x (sunrise, sunset): Unix seconds, little-endian.
+     *
+     * Layout per Gadgetbridge's CMF support (field-tested); the earlier cmfkit guess had
+     * min/max swapped, condition/temp swapped in the hourly records, and relative sun times.
      */
     fun weather(
         city: String,
         tempC: Int = 20,
-        condition: Int = 1,
+        condition: Int = Weather.SUNNY,
         days: List<WeatherDay> = emptyList(),
         hours: List<WeatherHour> = emptyList(),
+        sun: List<SunTimes> = emptyList(),
     ): ByteArray {
-        val today = WeatherDay(condition, tempC, tempC - 3, tempC + 3)
-        val dayList = (days.ifEmpty { listOf(today) } + List(7) { days.lastOrNull() ?: today }).take(7)
-        val hourList = (hours + List(24) { hours.lastOrNull() ?: WeatherHour(condition, tempC) }).take(24)
-        val dayBytes = dayList.map { byteArrayOf(it.condition.toByte(), temp(it.tempC), temp(it.lowC), temp(it.highC)).copyOf(9) }
-        val hourBytes = hourList.map { byteArrayOf(it.condition.toByte(), temp(it.tempC)) }
-        val sun = Bytes.concat(Bytes.u32le(6 * 3600L), Bytes.u32le(18 * 3600L))
-        val out = Bytes.concat(*dayBytes.toTypedArray(), *hourBytes.toTypedArray(), Bytes.fixed(city, WEATHER_CITY_MAX), *Array(7) { sun })
+        val dayList = days.ifEmpty { listOf(WeatherDay(condition, tempC, tempC + 3, tempC - 3)) }
+        val dayBytes = (0 until 7).map { i ->
+            val d = dayList.getOrNull(i)
+            if (d == null) byteArrayOf(0, 1, 1, 1, 0, 0, 0, 0, 0)
+            else Bytes.concat(
+                byteArrayOf(d.condition.toByte(), temp(d.tempC), temp(d.highC), temp(d.lowC), d.humidity.coerceIn(0, 100).toByte()),
+                Bytes.u16be(d.aqi.coerceIn(0, 0xFFFF)),
+                byteArrayOf(d.uv.coerceIn(0, 255).toByte(), d.windKmh.coerceIn(0, 255).toByte()),
+            )
+        }
+        val now = WeatherHour(dayList[0].condition, dayList[0].tempC)
+        val hourBytes = (0 until 24).map { i -> (hours.getOrNull(i) ?: now).let { byteArrayOf(temp(it.tempC), it.condition.toByte()) } }
+        val sunBytes = (0 until 7).map { i ->
+            val t = sun.getOrNull(i) ?: SunTimes(0, 0)
+            Bytes.concat(Bytes.u32le(t.riseS), Bytes.u32le(t.setS))
+        }
+        val out = Bytes.concat(*dayBytes.toTypedArray(), *hourBytes.toTypedArray(), Bytes.fixed(String(Bytes.clip(city, 30), Charsets.UTF_8), WEATHER_CITY_MAX), *sunBytes.toTypedArray())
         check(out.size == 199) { "weather payload must be 199 bytes" }
         return out
     }
+
+    /** Units shown on the watch (UNIT_LENGTH FFFF:9067 and UNIT_TEMPERATURE FFFF:9068). */
+    fun units(imperial: Boolean) = byteArrayOf(1, if (imperial) 1 else 0)
 
     fun parseWeatherCity(p: ByteArray) = Bytes.str(p.copyOfRange(111, 143))
 
