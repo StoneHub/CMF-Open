@@ -24,6 +24,7 @@
 
     <!-- Speaker experiment: routing audio over the call (SCO) link -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
 
     <!-- Per-app notification filters list every installed app (personal sideloaded build). -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
@@ -72,6 +73,15 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <service
+            android:name=".media.SpeakerCallService"
+            android:exported="true"
+            android:permission="android.permission.BIND_TELECOM_CONNECTION_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.ConnectionService" />
+            </intent-filter>
+        </service>
 
         <receiver
             android:name=".StopRingingReceiver"

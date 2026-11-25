@@ -353,12 +353,23 @@ private fun SpeakerSection() {
     val ctx = LocalContext.current
     val exp = remember { SpeakerExperiment(ctx.applicationContext) }
     var on by remember { mutableStateOf(exp.on) }
+    var callOn by remember { mutableStateOf(dev.cmfopen.companion.media.SpeakerCallService.current != null) }
     var note by remember { mutableStateOf<String?>(null) }
     Section("Watch as speaker (experiment)") {
         Hint("Plays phone audio through the watch's call link, so it sounds like a phone call. The watch must be connected for calls in Android's Bluetooth settings.")
-        ToggleRow("Route audio to the watch", on) {
+        ToggleRow("Mode 1: open the call audio link", on, "Plain SCO link. Didn't work on Nov 24; kept for comparison.") {
             note = if (it) exp.start() else { exp.stop(); "Stopped." }
             on = exp.on
+        }
+        ToggleRow("Mode 2: pretend phone call", callOn, "Starts a silent call so the watch switches into call audio.") {
+            if (it) {
+                note = dev.cmfopen.companion.media.SpeakerCallService.start(ctx)
+                callOn = true
+            } else {
+                dev.cmfopen.companion.media.SpeakerCallService.stop()
+                callOn = false
+                note = "Call ended."
+            }
         }
         note?.let { Hint(it) }
     }

@@ -14,7 +14,7 @@ does, without a browser:
 | Weather tile from Open-Meteo, by location or a typed city | new; icon ids unconfirmed |
 | Watch apps from the web store (`web/public/apps`), run unchanged in a hidden WebView; import your own `.js` | new |
 | Install photo and structured watch faces (`.bin`) | ported |
-| Watch as speaker over the call link | experiment |
+| Watch as speaker: plain call link, or a pretend phone call through Telecom | experiment |
 
 ## Layout
 
