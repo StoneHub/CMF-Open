@@ -105,6 +105,7 @@ fun WatchScreen(modifier: Modifier) {
         SetupSection()
         MusicSection(state.lastButton)
         WeatherSection()
+        ContactsSection()
         FacesSection(state.phase == Phase.CONNECTED)
         SpeakerSection()
     }
@@ -233,6 +234,41 @@ private fun MusicSection(lastButton: String?) {
         }
         Hint("Last button from the watch: ${lastButton ?: "none yet"}")
         Hint("If a watch button does the wrong thing, press it and check the code here or in the Log tab.")
+    }
+}
+
+// -- contacts ------------------------------------------------------------------
+
+@Composable
+private fun ContactsSection() {
+    val app = CompanionApp.instance
+    val prefs = app.prefs
+    val sync = app.watch.contacts
+    val scope = rememberCoroutineScope()
+    val version by prefs.version.collectAsStateWithLifecycle()
+    var note by remember { mutableStateOf<String?>(null) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        prefs.contactsEnabled = ok
+        note = if (ok) null else "Contacts permission denied"
+        if (ok) sync.syncSoon()
+    }
+    Section("Contacts") {
+        if (version < 0) return@Section // recompose on settings changes
+        ToggleRow("Send favourite contacts", prefs.contactsEnabled && sync.permitted, "Your starred contacts with a number, up to 20.") { on ->
+            if (on && !sync.permitted) launcher.launch(Manifest.permission.READ_CONTACTS)
+            else {
+                prefs.contactsEnabled = on
+                if (on) sync.syncSoon()
+            }
+        }
+        if (prefs.contactsEnabled && sync.permitted) {
+            OutlinedButton(onClick = {
+                scope.launch {
+                    note = runCatching { "Sent ${sync.syncOnce()} contacts" }.getOrElse { "Failed: ${it.message}" }
+                }
+            }) { Text("Send now") }
+        }
+        note?.let { Hint(it) }
     }
 }
 

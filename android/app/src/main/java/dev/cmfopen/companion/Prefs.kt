@@ -94,6 +94,13 @@ class Prefs(context: Context) {
         get() = sp.getString("weather_city", "") ?: ""
         set(v) = edit { putString("weather_city", v.trim()) }
 
+    // -- contacts --------------------------------------------------------------
+
+    /** Send starred contacts to the watch (needs READ_CONTACTS). */
+    var contactsEnabled: Boolean
+        get() = sp.getBoolean("contacts", false)
+        set(v) = edit { putBoolean("contacts", v) }
+
     // -- watch apps ------------------------------------------------------------
 
     var activeApp: String?
