@@ -203,9 +203,10 @@ class WatchManager(private val context: Context, private val prefs: Prefs) {
         }
         session = s
         val fw = runCatching { s.firmwareVersion() }.getOrNull()
-        val bat = runCatching { s.battery() }.getOrNull()
-        // The watch also pushes BATTERY by itself right after auth (handled in onWatchMessage), and may not
-        // answer the poll; keep that reading rather than clearing it.
+        // The watch pushes BATTERY right after login (seen before FIRMWARE_VERSION_RET) and doesn't answer
+        // the poll then, which would cost the full request timeout; poll only if nothing arrived.
+        val bat = if (_state.value.battery != null) null else runCatching { s.battery() }.getOrNull()
+        // Keep the pushed reading (handled in onWatchMessage) rather than clearing it.
         _state.update { it.copy(phase = Phase.CONNECTED, firmware = fw, battery = bat?.level ?: it.battery, charging = bat?.charging ?: it.charging, error = null) }
         DebugLog.info("connected: firmware $fw, battery ${_state.value.battery}%")
         onConnected()
