@@ -1,0 +1,107 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>CMF watch app host</title>
+<script>
+// Runs one watch app module (the same ES modules the web store runs, see web/src/lib/apps/
+// sandbox.worker.ts). The app gets a `watch` object; drawing calls go to the phone through the
+// CmfHost bridge, which forwards them to the watch. Ticks are driven from Kotlin so a hidden
+// WebView's timer throttling can't slow apps down.
+(() => {
+  const H = window.CmfHost
+  const pending = new Map()
+  let nextId = 1
+  let mod = {}
+  let storage = {}
+  let queue = Promise.resolve()
+  let running = false
+  let ticking = false
+
+  const text = (v) => (v == null ? '' : String(v))
+  const fmt = (args) => args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')
+
+  function screen(call, args) {
+    const id = nextId++
+    return new Promise((resolve, reject) => {
+      pending.set(id, { resolve, reject })
+      H.screen(id, JSON.stringify({ call, args }))
+    })
+  }
+
+  const watch = {
+    settings: {},
+    status: (line1, line2 = '', opts = {}) => screen('status', [text(line1), text(line2), opts.playing ?? true]),
+    card: (title, body = '') => screen('card', [text(title), text(body)]),
+    ticker: (value, tempC = 20) => screen('ticker', [text(value), Math.round(Number(tempC) || 0)]),
+    menu: (rows) =>
+      screen('menu', [
+        rows.map((r) =>
+          Array.isArray(r) ? [text(r[0]), text(r[1])] : typeof r === 'object' && r ? [text(r.name), text(r.detail)] : [text(r), ''],
+        ),
+      ]),
+    buzz: () => screen('buzz', []),
+    storage: {
+      get: (key, fallback) => (key in storage ? storage[key] : fallback),
+      set: (key, value) => {
+        storage[key] = value
+        H.storage(key, JSON.stringify(value === undefined ? null : value))
+      },
+    },
+    log: (...args) => H.log('info', fmt(args)),
+    exit: () => H.exit(),
+  }
+
+  function call(name, ...args) {
+    const run = queue.then(async () => {
+      const app = mod.default
+      const fn = app && app[name]
+      if (typeof fn === 'function') await fn.call(app, watch, ...args)
+    })
+    queue = run.catch((e) => H.error(`${name}: ${(e && e.message) || e}`, false))
+    return queue
+  }
+
+  window.addEventListener('error', (e) => H.log('error', e.message || 'error'))
+  window.addEventListener('unhandledrejection', (e) => H.log('error', String((e.reason && e.reason.message) || e.reason)))
+
+  window.cmf = {
+    ack(id, error) {
+      const p = pending.get(id)
+      pending.delete(id)
+      if (!p) return
+      if (error) p.reject(new Error(error))
+      else p.resolve()
+    },
+    async load(source, settings, saved) {
+      watch.settings = Object.freeze({ ...settings })
+      storage = { ...saved }
+      const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }))
+      try {
+        mod = await import(url)
+        H.loaded(JSON.stringify(mod.manifest ?? null))
+      } catch (e) {
+        H.error(`could not load app: ${e.message}`, true)
+      } finally {
+        URL.revokeObjectURL(url)
+      }
+    },
+    async start() {
+      running = true
+      await call('start')
+    },
+    tick() {
+      if (!running || ticking) return
+      ticking = true
+      call('tick').finally(() => (ticking = false))
+    },
+    async button(b) {
+      if (running) await call('onButton', b)
+    },
+    async stop() {
+      running = false
+      await call('stop')
+      H.stopped()
+    },
+  }
+  H.ready()
+})()
+</script>
