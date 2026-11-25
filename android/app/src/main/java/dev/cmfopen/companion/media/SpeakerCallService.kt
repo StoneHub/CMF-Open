@@ -42,12 +42,28 @@ class SpeakerCallService : ConnectionService() {
     }
 
     class SpeakerConnection : Connection() {
+        /**
+         * How many times we've asked for the Bluetooth route. On a Watch 3 Pro (Nov 25) the route
+         * fell back to the earpiece within ~0.4 s of every request, so re-requesting on each change
+         * looped several times a second. Ask a few times, then leave it and say so.
+         */
+        private var btRequests = 0
+        private var lastRoute = -1
+
         override fun onCallAudioStateChanged(state: CallAudioState) {
+            if (state.route == lastRoute) return
+            lastRoute = state.route
             DebugLog.info("speaker call: audio route=${CallAudioState.audioRouteToString(state.route)} supported=${state.supportedRouteMask}")
-            if (state.route != CallAudioState.ROUTE_BLUETOOTH && state.supportedRouteMask and CallAudioState.ROUTE_BLUETOOTH != 0) {
-                @Suppress("DEPRECATION")
-                setAudioRoute(CallAudioState.ROUTE_BLUETOOTH)
+            if (state.route == CallAudioState.ROUTE_BLUETOOTH || state.supportedRouteMask and CallAudioState.ROUTE_BLUETOOTH == 0) return
+            if (btRequests >= MAX_BT_REQUESTS) {
+                if (btRequests++ == MAX_BT_REQUESTS) {
+                    DebugLog.warn("speaker call: the watch dropped call audio $MAX_BT_REQUESTS times; leaving it on ${CallAudioState.audioRouteToString(state.route)}")
+                }
+                return
             }
+            btRequests++
+            @Suppress("DEPRECATION")
+            setAudioRoute(CallAudioState.ROUTE_BLUETOOTH)
         }
 
         override fun onDisconnect() = end()
@@ -63,6 +79,7 @@ class SpeakerCallService : ConnectionService() {
 
     companion object {
         @Volatile var current: SpeakerConnection? = null
+        private const val MAX_BT_REQUESTS = 3
 
         private fun handle(ctx: Context) = PhoneAccountHandle(ComponentName(ctx, SpeakerCallService::class.java), "watch-speaker")
 
