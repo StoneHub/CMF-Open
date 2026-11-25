@@ -57,6 +57,7 @@ class WatchManager(private val context: Context, private val prefs: Prefs) {
 
     val media = MediaBridge(context, prefs, this)
     val weather = WeatherSync(context, prefs, this)
+    val contacts = ContactsSync(context, prefs, this)
     val apps = AppRuntime(context, prefs, this)
     val ringer = PhoneRinger(context)
 
@@ -174,7 +175,7 @@ class WatchManager(private val context: Context, private val prefs: Prefs) {
         val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
             ?: throw IllegalStateException("no Bluetooth adapter")
         if (!adapter.isEnabled) throw IllegalStateException("Bluetooth is off")
-        _state.update { it.copy(phase = Phase.CONNECTING, error = null, retryInS = null) }
+        _state.update { it.copy(phase = Phase.CONNECTING, error = null, retryInS = null, battery = null) }
         DebugLog.info("connecting to $address")
         val t = BleTransport(context, adapter.getRemoteDevice(address))
         t.onDisconnected = {
@@ -203,8 +204,10 @@ class WatchManager(private val context: Context, private val prefs: Prefs) {
         session = s
         val fw = runCatching { s.firmwareVersion() }.getOrNull()
         val bat = runCatching { s.battery() }.getOrNull()
-        _state.update { it.copy(phase = Phase.CONNECTED, firmware = fw, battery = bat?.level, charging = bat?.charging ?: false, error = null) }
-        DebugLog.info("connected: firmware $fw, battery ${bat?.level}%")
+        // The watch also pushes BATTERY by itself right after auth (handled in onWatchMessage), and may not
+        // answer the poll; keep that reading rather than clearing it.
+        _state.update { it.copy(phase = Phase.CONNECTED, firmware = fw, battery = bat?.level ?: it.battery, charging = bat?.charging ?: it.charging, error = null) }
+        DebugLog.info("connected: firmware $fw, battery ${_state.value.battery}%")
         onConnected()
         scope.launch { housekeeping(s, dropped) }
     }
@@ -224,6 +227,7 @@ class WatchManager(private val context: Context, private val prefs: Prefs) {
             else -> media.push(force = true)
         }
         weather.refreshSoon()
+        contacts.syncSoon()
     }
 
     /** Battery and clock every 15 minutes while this session lives. */
@@ -242,11 +246,14 @@ class WatchManager(private val context: Context, private val prefs: Prefs) {
     // -- inbound ----------------------------------------------------------------
 
     private fun onWatchMessage(m: Message) {
+        if (m.op == Ops.BATTERY && m.payload.isNotEmpty()) {
+            val bat = Payloads.parseBattery(m.payload)
+            _state.update { it.copy(battery = bat.level, charging = bat.charging) }
+            return
+        }
         val b = WatchButton.from(m, prefs.buttonCodes)
         if (b == null) {
-            if (m.op != Ops.APP_NOTIFICATION_ACK && m.op != Ops.MUSIC_INFO_ACK && m.op != Ops.FIND_WATCH_ACK && m.op != Ops.CONTACTS_ACK) {
-                DebugLog.info("unhandled ${m}")
-            }
+            if (m.op !in QUIET) DebugLog.info("unhandled ${m}")
             return
         }
         val code = if (m.op == Ops.MUSIC_BUTTON && m.payload.isNotEmpty()) " (code ${m.payload[0].toInt() and 0xFF})" else ""
@@ -286,6 +293,16 @@ class WatchManager(private val context: Context, private val prefs: Prefs) {
     fun findWatch() = launchWithSession("find watch") { it.findWatch() }
 
     companion object {
+        /**
+         * Inbound messages that need no handling. The session already logs each one as it arrives,
+         * so an extra "unhandled" line would only be noise. FIND_WATCH from the watch means the
+         * user dismissed find-my-watch on the wrist; the rest arrive unprompted after login.
+         */
+        private val QUIET = setOf(
+            Ops.APP_NOTIFICATION_ACK, Ops.MUSIC_INFO_ACK, Ops.FIND_WATCH_ACK, Ops.CONTACTS_ACK,
+            Ops.FIND_WATCH, Ops.UNKNOWN_LANGUAGE, Ops.UNKNOWN_A06A, Ops.DIAL_COMMAND_REPLY,
+        )
+
         private val BACKOFF_S = intArrayOf(3, 5, 10, 20, 30, 60, 120)
     }
 }
