@@ -45,7 +45,7 @@ class PhoneRinger(private val context: Context) {
         DebugLog.info("find phone: ringing")
     }
 
-    fun stop() = main.post {
+    fun stop(): Boolean = main.post {
         main.removeCallbacks(autoStop)
         player?.runCatching { stop(); release() }
         player = null
