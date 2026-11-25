@@ -61,6 +61,13 @@ object Ops {
     val UNKNOWN_LANGUAGE = Op(0xFFFF, 0xA06B)
     val UNKNOWN_A06A = Op(0xFFFF, 0xA06A)
 
+    /** Watch's replies to UNIT_LENGTH / UNIT_TEMPERATURE (payload 00), seen on a Watch 3 Pro. */
+    val UNIT_LENGTH_ACK = Op(0xFFFF, 0xA067)
+    val UNIT_TEMPERATURE_ACK = Op(0xFFFF, 0xA068)
+
+    /** Sent by the watch (payload 5a) when its music card opens; it appears to want fresh music info. Inferred, not documented. */
+    val MUSIC_CARD_OPEN = Op(0xFFFF, 0xA090)
+
     /** Opcodes that are never AES-encrypted, even after a key is established. */
     val PLAINTEXT: Set<Op> = setOf(AUTH_PAIR_REQUEST, AUTH_PAIR_REPLY, WF_CHUNK_WRITE, FW_CHUNK_WRITE, Op(0xFFFF, 0x905F))
 

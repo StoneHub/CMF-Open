@@ -258,6 +258,12 @@ class WatchManager(private val context: Context, private val prefs: Prefs) {
             _state.update { it.copy(battery = bat.level, charging = bat.charging) }
             return
         }
+        if (m.op == Ops.MUSIC_CARD_OPEN) {
+            // The first press on a freshly opened music card can be swallowed until the watch has
+            // current music info, so answer right away.
+            if (!apps.active) media.push(force = true)
+            return
+        }
         val b = WatchButton.from(m, prefs.buttonCodes)
         if (b == null) {
             if (m.op !in QUIET) DebugLog.info("unhandled ${m}")
@@ -308,6 +314,7 @@ class WatchManager(private val context: Context, private val prefs: Prefs) {
         private val QUIET = setOf(
             Ops.APP_NOTIFICATION_ACK, Ops.MUSIC_INFO_ACK, Ops.FIND_WATCH_ACK, Ops.CONTACTS_ACK,
             Ops.FIND_WATCH, Ops.UNKNOWN_LANGUAGE, Ops.UNKNOWN_A06A, Ops.DIAL_COMMAND_REPLY,
+            Ops.UNIT_LENGTH_ACK, Ops.UNIT_TEMPERATURE_ACK,
         )
 
         private val BACKOFF_S = intArrayOf(3, 5, 10, 20, 30, 60, 120)
