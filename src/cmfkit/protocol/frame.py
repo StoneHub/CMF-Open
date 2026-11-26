@@ -116,6 +116,9 @@ class FrameDecoder:
                 del self._partial[op]
 
     def _open(self, body: bytes, encrypted: bool) -> bytes:
+        if not body:
+            # Bare acks (e.g. 0065:0003 after a notification) carry no body, even on encrypted ops.
+            return b""
         if encrypted:
             assert self.key is not None
             try:
