@@ -105,6 +105,7 @@ fun WatchScreen(modifier: Modifier) {
         SetupSection()
         MusicSection(state.lastButton)
         WeatherSection()
+        ContactsSection()
         FacesSection(state.phase == Phase.CONNECTED)
         SpeakerSection()
     }
@@ -236,6 +237,41 @@ private fun MusicSection(lastButton: String?) {
     }
 }
 
+// -- contacts ------------------------------------------------------------------
+
+@Composable
+private fun ContactsSection() {
+    val app = CompanionApp.instance
+    val prefs = app.prefs
+    val sync = app.watch.contacts
+    val scope = rememberCoroutineScope()
+    val version by prefs.version.collectAsStateWithLifecycle()
+    var note by remember { mutableStateOf<String?>(null) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        prefs.contactsEnabled = ok
+        note = if (ok) null else "Contacts permission denied"
+        if (ok) sync.syncSoon()
+    }
+    Section("Contacts") {
+        if (version < 0) return@Section // recompose on settings changes
+        ToggleRow("Send favourite contacts", prefs.contactsEnabled && sync.permitted, "Your starred contacts with a number, up to 20.") { on ->
+            if (on && !sync.permitted) launcher.launch(Manifest.permission.READ_CONTACTS)
+            else {
+                prefs.contactsEnabled = on
+                if (on) sync.syncSoon()
+            }
+        }
+        if (prefs.contactsEnabled && sync.permitted) {
+            OutlinedButton(onClick = {
+                scope.launch {
+                    note = runCatching { "Sent ${sync.syncOnce()} contacts" }.getOrElse { "Failed: ${it.message}" }
+                }
+            }) { Text("Send now") }
+        }
+        note?.let { Hint(it) }
+    }
+}
+
 // -- weather -------------------------------------------------------------------
 
 @Composable
@@ -247,7 +283,11 @@ private fun WeatherSection() {
     var busy by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf(app.watch.weather.last?.let { "${it.place}: ${it.tempC}°C, ${it.description}" }) }
     Section("Weather") {
-        ToggleRow("Send weather to the watch", prefs.weatherEnabled, "From Open-Meteo, every 30 minutes.") { prefs.weatherEnabled = it }
+        ToggleRow("Send weather to the watch", prefs.weatherEnabled, "Now, hourly and 7-day forecast from Open-Meteo, refreshed every 30 minutes while connected.") { prefs.weatherEnabled = it }
+        ToggleRow("Fahrenheit and miles", prefs.imperialUnits, "Changes how the watch shows temperature and distance.") {
+            prefs.imperialUnits = it
+            app.watch.pushUnits()
+        }
         OutlinedTextField(
             value = city,
             onValueChange = { city = it },

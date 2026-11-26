@@ -58,7 +58,10 @@ class MediaBridge(private val context: Context, private val prefs: Prefs, privat
         }
     }
 
-    private fun pick(list: List<MediaController>) {
+    private fun pick(all: List<MediaController>) {
+        // Telecom publishes a session for calls (including the speaker experiment's own call). It
+        // isn't media; following it blanked the music card to "Nothing playing" during a call.
+        val list = all.filter { it.packageName != TELECOM_PACKAGE }
         val best = list.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: list.firstOrNull()
         if (best?.sessionToken == controller?.sessionToken) return
         controller?.unregisterCallback(callback)
@@ -126,5 +129,9 @@ class MediaBridge(private val context: Context, private val prefs: Prefs, privat
         val now = SystemClock.uptimeMillis()
         audio.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, code, 0))
         audio.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, code, 0))
+    }
+
+    companion object {
+        private const val TELECOM_PACKAGE = "com.android.server.telecom"
     }
 }

@@ -21,6 +21,8 @@
     <!-- Weather and network watch apps -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Starred contacts for the watch's contacts list (optional). -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
 
     <!-- Speaker experiment: routing audio over the call (SCO) link -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />

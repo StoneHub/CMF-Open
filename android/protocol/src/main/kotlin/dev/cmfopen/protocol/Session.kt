@@ -204,6 +204,12 @@ class Session(
 
     suspend fun setWeather(payload: ByteArray) = send(Ops.WEATHER_SET, payload)
 
+    /** Show miles/°F (imperial) or km/°C on the watch. */
+    suspend fun setUnits(imperial: Boolean) {
+        send(Ops.UNIT_LENGTH, Payloads.units(imperial))
+        send(Ops.UNIT_TEMPERATURE, Payloads.units(imperial))
+    }
+
     suspend fun setContacts(entries: List<Payloads.Contact>) = send(Ops.CONTACTS_SET, Payloads.contacts(entries))
 
     /** Short vibration via the factory shell. SET* commands often execute without echoing OK. */

@@ -12,6 +12,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -34,7 +38,9 @@ fun ToggleRow(label: String, checked: Boolean, help: String? = null, onChange: (
             if (help != null) Text(help, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.width(12.dp))
-        Switch(checked = checked, onCheckedChange = onChange)
+        // Prefs aren't Compose state, so keep the switch's own state; otherwise it only redraws on rotation.
+        var on by remember(checked) { mutableStateOf(checked) }
+        Switch(checked = on, onCheckedChange = { on = it; onChange(it) })
     }
 }
 

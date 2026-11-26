@@ -133,6 +133,7 @@ class AppRuntime(private val context: Context, private val prefs: Prefs, private
             if (then != null) then() else {
                 watch.media.push(force = true)
                 watch.weather.refreshSoon()
+                watch.contacts.syncSoon()
             }
         }, 800)
     }

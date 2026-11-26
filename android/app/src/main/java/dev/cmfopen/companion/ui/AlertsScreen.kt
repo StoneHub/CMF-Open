@@ -37,7 +37,8 @@ fun AlertsScreen(modifier: Modifier) {
     val ctx = LocalContext.current
     val app = CompanionApp.instance
     val prefs = app.prefs
-    @Suppress("UNUSED_VARIABLE") val v by prefs.version.collectAsStateWithLifecycle()
+    val v = prefs.version.collectAsStateWithLifecycle().value
+    var allowlist by remember { mutableStateOf(prefs.notifyAllowlist) }
     var apps by remember { mutableStateOf<List<InstalledApp>>(emptyList()) }
     var query by remember { mutableStateOf("") }
 
@@ -74,8 +75,8 @@ fun AlertsScreen(modifier: Modifier) {
                     }) { Text("Send a test") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = !prefs.notifyAllowlist, onClick = { prefs.notifyAllowlist = false }, label = { Text("All apps except muted") })
-                    FilterChip(selected = prefs.notifyAllowlist, onClick = { prefs.notifyAllowlist = true }, label = { Text("Only apps I pick") })
+                    FilterChip(selected = !allowlist, onClick = { prefs.notifyAllowlist = false; allowlist = false }, label = { Text("All apps except muted") })
+                    FilterChip(selected = allowlist, onClick = { prefs.notifyAllowlist = true; allowlist = true }, label = { Text("Only apps I pick") })
                 }
                 OutlinedTextField(query, { query = it }, label = { Text("Search apps") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 if (apps.isEmpty()) Hint("Loading apps…")
@@ -87,7 +88,8 @@ fun AlertsScreen(modifier: Modifier) {
                     Text(a.label)
                     Hint(a.pkg)
                 }
-                Switch(checked = prefs.appForwarded(a.pkg), onCheckedChange = { prefs.setAppForwarded(a.pkg, it) })
+                var on by remember(a.pkg, allowlist, v) { mutableStateOf(prefs.appForwarded(a.pkg)) }
+                Switch(checked = on, onCheckedChange = { prefs.setAppForwarded(a.pkg, it); on = it })
             }
         }
     }
