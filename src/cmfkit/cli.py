@@ -226,7 +226,11 @@ def cmd_aota_replace(args: argparse.Namespace) -> None:
 
 def cmd_snoop(args: argparse.Namespace) -> None:
     authkey = bytes.fromhex(args.authkey) if args.authkey else None
-    for line in btsnoop.decode_log(args.file, authkey, show_payload=not args.headers_only):
+    secret = bytes.fromhex(args.secret) if args.secret else None
+    for line in btsnoop.decode_log(args.file, authkey, show_payload=not args.headers_only, secret=secret):
+        print(line)
+    print("\n# Bluetooth channels in this capture")
+    for line in btsnoop.channel_summary(args.file):
         print(line)
 
 
@@ -310,6 +314,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("snoop", help="decode CMF frames from an Android btsnoop_hci.log capture")
     s.add_argument("file")
     s.add_argument("--authkey", help="32-hex auth key to decrypt payloads (from a rooted phone or `cmfkit pair`)")
+    s.add_argument("--secret", help="32-hex device secret; with a pairing in the capture it yields the auth key")
     s.add_argument("--headers-only", action="store_true")
     s.set_defaults(func=cmd_snoop)
     return p
