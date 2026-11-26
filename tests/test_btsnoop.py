@@ -44,11 +44,28 @@ async def test_decode_simulated_capture(tmp_path):
     log = tmp_path / "btsnoop_hci.log"
     log.write_bytes(watch.to_btsnoop())
 
-    headers = list(btsnoop.decode_log(log))
+    headers = list(btsnoop.decode_log(log, show_payload=False))
     assert any("AT    AT GETSECRET" in line for line in headers)
     assert any("AUTH_PAIR_REQUEST" in line for line in headers)
-    assert any("APP_NOTIFICATION" in line and "<encrypted" in line for line in headers)
+    assert any("APP_NOTIFICATION" in line for line in headers)
 
     decrypted = "\n".join(btsnoop.decode_log(log, authkey))
     assert b"hello snoop".hex() in decrypted
     assert "BATTERY" in decrypted and "5700" in decrypted  # 87 % (0x57), not charging
+
+
+async def test_capture_with_pairing_decrypts_without_authkey(tmp_path):
+    watch = RecordingSim()
+    await watch.connect()
+    s = Session(watch, timeout=2)
+    await s.pair()
+    await s.notify("Captured", "derived key")
+    log = tmp_path / "btsnoop_hci.log"
+    log.write_bytes(watch.to_btsnoop())
+
+    lines = "\n".join(btsnoop.decode_log(log))
+    assert "auth key derived from this pairing" in lines
+    assert b"derived key".hex() in lines
+
+    summary = btsnoop.channel_summary(log)
+    assert len(summary) == 1 and "ATT (BLE)" in summary[0]

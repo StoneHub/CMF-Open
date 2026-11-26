@@ -9,6 +9,7 @@ from the nonce seen in the capture).
 
 from __future__ import annotations
 
+import re
 import struct
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -32,7 +33,17 @@ class AttValue:
     value: bytes
 
 
-def read_att(path: str | Path) -> Iterator[AttValue]:
+@dataclass
+class L2capPacket:
+    ts_us: int
+    outgoing: bool
+    conn: int
+    cid: int
+    payload: bytes
+
+
+def read_l2cap(path: str | Path) -> Iterator[L2capPacket]:
+    """Reassembled L2CAP packets from ACL data, on every channel (BLE and Classic)."""
     data = Path(path).read_bytes()
     if data[:8] != BTSNOOP_MAGIC:
         raise ValueError("not a btsnoop file")
@@ -68,12 +79,57 @@ def read_att(path: str | Path) -> Iterator[AttValue]:
         if len(buf) < l2_len:
             continue
         del partial[conn]
-        if cid != ATT_CID or not buf:
+        yield L2capPacket(ts - EPOCH_DELTA_US, direction, conn, cid, bytes(buf[:l2_len]))
+
+
+def read_att(path: str | Path) -> Iterator[AttValue]:
+    for p in read_l2cap(path):
+        buf = p.payload
+        if p.cid != ATT_CID or not buf:
             continue
-        opcode = buf[0]
-        if opcode in (ATT_WRITE_REQ, ATT_WRITE_CMD, ATT_NOTIFY, ATT_INDICATE) and len(buf) >= 3:
+        if buf[0] in (ATT_WRITE_REQ, ATT_WRITE_CMD, ATT_NOTIFY, ATT_INDICATE) and len(buf) >= 3:
             (att_handle,) = struct.unpack_from("<H", buf, 1)
-            yield AttValue(ts - EPOCH_DELTA_US, direction, att_handle, bytes(buf[3:l2_len]))
+            yield AttValue(p.ts_us, p.outgoing, att_handle, buf[3:])
+
+
+PSM_NAMES = {
+    0x0001: "SDP",
+    0x0003: "RFCOMM (HFP/SPP)",
+    0x0017: "AVCTP (media keys)",
+    0x0019: "AVDTP (A2DP audio)",
+    0x001B: "AVCTP browsing",
+    0x001F: "ATT (EATT)",
+    0x0080: "LE ATT",
+}
+L2CAP_CONN_REQ = 0x02
+
+
+def channel_summary(path: str | Path) -> list[str]:
+    """Which Bluetooth channels carried traffic, and how much. Shows whether audio went
+    over Classic A2DP/HFP rather than the BLE command service."""
+    psm_of: dict[tuple[int, int], int] = {}
+    totals: dict[tuple[int, int], list[int]] = {}
+    for p in read_l2cap(path):
+        if p.cid in (0x0001, 0x0005) and len(p.payload) >= 8 and p.payload[0] == L2CAP_CONN_REQ:
+            psm, scid = struct.unpack_from("<HH", p.payload, 4)
+            psm_of[(p.conn, scid)] = psm
+        t = totals.setdefault((p.conn, p.cid), [0, 0, 0])
+        t[0 if p.outgoing else 1] += len(p.payload)
+        t[2] += 1
+    lines = []
+    for (conn, cid), (out_b, in_b, n) in sorted(totals.items()):
+        if cid == ATT_CID:
+            label = "ATT (BLE)"
+        elif cid in (0x0001, 0x0005):
+            label = "L2CAP signalling"
+        else:
+            psm = psm_of.get((conn, cid))
+            label = PSM_NAMES.get(psm, f"PSM 0x{psm:04x}") if psm is not None else "dynamic channel"
+        lines.append(
+            f"conn 0x{conn:03x} cid 0x{cid:04x} {label:<22} {n:6d} pkts"
+            f"  phone->watch {out_b:9d} B  watch->phone {in_b:9d} B"
+        )
+    return lines
 
 
 @dataclass
@@ -120,19 +176,34 @@ class _Stream:
             yield RawFrame(op, index, count, body, encrypted)
 
 
-def decode_log(path: str | Path, authkey: bytes | None = None, show_payload: bool = True) -> Iterator[str]:
+def decode_log(
+    path: str | Path, authkey: bytes | None = None, show_payload: bool = True, secret: bytes | None = None
+) -> Iterator[str]:
+    """Yield one line per frame. Without an auth key, a capture that includes a fresh
+    pairing is still decryptable: the device secret (passed in, or read from the
+    ``AT GETSECRET`` reply in the log) plus the two plaintext pairing randoms give it."""
     streams: dict[tuple[bool, int], _Stream] = {}
     key: bytes | None = None
+    rnd1: bytes | None = None
     t0: int | None = None
     for att in read_att(path):
         t0 = att.ts_us if t0 is None else t0
         stamp = f"{(att.ts_us - t0) / 1e6:9.3f}s {'->' if att.outgoing else '<-'} h{att.handle:04x}"
         if att.value[:1] != bytes([frame.MAGIC]) and all(32 <= b < 127 or b in (10, 13) for b in att.value):
-            yield f"{stamp} AT    {att.value.decode().strip()}"
+            text = att.value.decode()
+            found = re.search(r"GETSECRET:([0-9A-Fa-f]{32})", text)
+            if found and secret is None:
+                secret = bytes.fromhex(found.group(1))
+            yield f"{stamp} AT    {text.strip()}"
             continue
         stream = streams.setdefault((att.outgoing, att.handle), _Stream())
         for rf in stream.feed(att.value):
             name = ops.name_of(rf.op)
+            if rf.op == ops.AUTH_PAIR_REQUEST:
+                rnd1 = rf.body[:16]
+            elif rf.op == ops.AUTH_PAIR_REPLY and rnd1 and secret and len(rf.body) >= 16:
+                authkey = crypto.derive_authkey(rnd1, rf.body[:16], secret)
+                yield f"{stamp} (auth key derived from this pairing: {authkey.hex()})"
             text = ""
             if show_payload:
                 payload = rf.body
